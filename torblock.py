@@ -1,9 +1,11 @@
-#!/usr/bin/python
+#!/usr/bin/python3
 
 # Block Tor Exit Nodes With Iptables
 # Author: V. Alex Brennen <vab@mit.edu>
 # License: This script is public domain
-# Date: 2013-10-22
+# Date: 2018-01-13
+# Updated for Python 3 by: Sam Cleveland <samjcleveland@gmail.com>
+#
 
 # Description:  This script attempts to block all known tor exit nodes (as
 #		reported by the Tor Project's website) from communicating
@@ -14,59 +16,30 @@ import sys
 import re
 import requests
 import subprocess
+import ipaddress
+import argparse
 
-
-# Validate numeric IP address
-def numeric_ipaddr(ip):
-	quads = ip.split('.')
-	if( len(quads) != 4):
-		return False;
-	else:
-		for quad in quads:
-			byte = int(quad)
-			if( (byte <= 0) and (byte >= 255) ):
-				return False
-			else:
-				return True
-
-
-# Validate public addressable IP address (not private, loopback, or broadcast)
-# This function makes sure we do not cause system problems by banning the 
-# loopback, broadcast, or any private IP networks that may be in use locally
-# should the website return invalid exit addresses.
-def public_ipaddr(ip):
-	quads = ip.split('.')
-	# Invalid
-	if (int(quads[0]) == 0):
-		return False
-	# Loop back
-	elif (int(quads[0]) == 127):
-		return False
-	# Broadcast
-	elif((int(quads[0]) == 255) or (int(quads[1]) == 255) or (int(quads[2]) == 255) or (int(quads[3]) == 255)):
-		return False
-	# Private
-	elif(int(quads[0]) == 10):
-		return False
-	elif((int(quads[0]) == 172) and ((int(quads[1]) > 15) and (int(quads[1]) < 32))):
-		return False
-	elif((int(quads[0]) == 192) and (int(quads[1]) == 168)):
-		return False
-	else:
-		return True
-
+def parse_args():
+    parser = argparse.ArgumentParser(description='TorBlock - Block Tor Exit Nodes with IPtables or Nginx.')
+    parser.add_argument('server_ip', help='IP address of the server where the blocking will occur.')
+    parser.add_argument('--nginx', metavar="Filename", default="tor_exits.conf", type=argparse.FileType("a"), help='Filename to output the Nginx configuration file to.')
+    return parser.parse_args()
 
 # Execute iptables command to block a node after sanity checking
-def blocknode(ip):
-	if public_ipaddr(ip) and numeric_ipaddr(ip):
-		ip = ip + "/32"
-		try: subprocess.check_call(['iptables', '-A', 'INPUT', '-s', ip, '-j', 'DROP'])
- 		except OSError as e:
-			if (e[0] == errno.EPERM):
-				print >> sys.stderr, "Since this script modifies the firewall with iptables it must be run with root privileges."
-				sys.exit(1)
-		print "Dropping all packets from " + ip
-	return True
+def block_iptables(ip):
+    """Generate iptables entries for each tor exit node"""
+    try:
+        subprocess.check_call(['iptables', '-A', 'INPUT', '-s', ip, '-j', 'DROP'])
+    except OSError as e:
+            if (e[0] == errno.EPERM):
+                print("Since this script modifies the firewall with iptables it must be run with root privileges.", file=sys.stderr)
+                sys.exit(1)
+    print("Dropping all packets from " + ip)
+    return True
+
+def block_nginx(ip, output_file):
+    """Outputs IP addresses in the Nginx 'deny' format"""
+    output_file.write("deny {ip};\n".format(ip=ip))
 
 
 # The main loop. It calls the blocknodes() function to attempt to open the
@@ -74,15 +47,32 @@ def blocknode(ip):
 # an iptables command to block a node. If it encounters a help request, it
 # calls the usage() function to print the usage information and exit the
 # program.
+args = parse_args()
+print("Blocking all tor exit nodes.")
 
-print "Blocking all tor exit nodes."
+print("Retrieving list of nodes from Tor project website.")
+ip_list_url = "https://check.torproject.org/cgi-bin/TorBulkExitList.py?ip={server_ip}"
 
-print "Retrieving list of nodes from Tor project website."
-exits = "https://check.torproject.org/exit-addresses"
+response = requests.get(ip_list_url.format(server_ip=args.server_ip), stream=True)
 
-response = requests.get(exits, stream=True)
 for line in response.iter_lines():
-	if 'ExitAddress' in line:
-		ip = line.split(' ', 3 )
-		if re.match("^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$", ip[1]):
-			blocknode(ip[1])
+    if '#' in line.decode():
+        continue
+
+    try:
+        ip = ipaddress.ip_address(line.decode().strip())
+        if ip.is_private:
+            print("Private IP address found. Skipping.")
+            continue
+
+        ip_network = ipaddress.ip_network(ip.exploded)
+        ip_cidr = ip_network.exploded
+
+    except ipaddress.AddressValueError as e:
+        print("Invalid IP Address found. Skipping.")
+        continue
+
+    if args.nginx:
+        block_nginx(ip_cidr, args.nginx)
+    else:
+        block_iptables(ip_cidr)
