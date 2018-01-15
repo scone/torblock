@@ -6,7 +6,9 @@ exit IP addresses.
 
 Torblock is a python script that will attempt to block all known tor exit
 nodes from communicating with the system that it is run on using iptables
-firewalling rules.
+firewalling rules or Nginx deny rules. 
+NOTE: iptables uses the INPUT chain and flushes on each run. Don't run if
+you have other rules in INPUT.
 
 The script retrieves a list of tor exit nodes from the tor project web 
 site ( https://check.torproject.org/cgi-bin/TorBulkExitList.py?ip=<your IP> ) list. It extracts
