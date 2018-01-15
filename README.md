@@ -1,12 +1,15 @@
 torblock.py
 ===========
 
+Fork: of vab/torblock to support Python 3+ and the updated method of getting
+exit IP addresses.
+
 Torblock is a python script that will attempt to block all known tor exit
 nodes from communicating with the system that it is run on using iptables
 firewalling rules.
 
 The script retrieves a list of tor exit nodes from the tor project web 
-site ( https://check.torproject.org/exit-addresses ) list. It extracts
+site ( https://check.torproject.org/cgi-bin/TorBulkExitList.py?ip=<your IP> ) list. It extracts
 the IP addresses from the list, runs some sanity checks against them
 and then uses the python subprocess module to pass the IP address to 
 iptables. Iptables is told to drop all packets from the IPs with the 
